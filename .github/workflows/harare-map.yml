@@ -1,0 +1,52 @@
+name: Make Harare map
+
+# Run this once by hand (Actions tab > Make Harare map > Run workflow).
+# It cuts Harare out of the free Protomaps world map and puts the file in a Release called "harare-map".
+# WaveStride downloads it from there.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the map tool
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R protomaps/go-pmtiles -p '*Linux_x86_64.tar.gz' -O pm.tgz
+          tar xzf pm.tgz
+          ls -la
+
+      - name: Find the newest world map
+        id: w
+        run: |
+          for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13; do
+            d=$(date -u -d "-$i day" +%Y%m%d)
+            if curl -sf -r 0-0 -o /dev/null "https://build.protomaps.com/$d.pmtiles"; then
+              echo "url=https://build.protomaps.com/$d.pmtiles" >> "$GITHUB_OUTPUT"
+              echo "Using the map from $d"
+              exit 0
+            fi
+          done
+          echo "Could not find a recent world map"
+          exit 1
+
+      - name: Cut out Harare
+        run: |
+          ./pmtiles extract "${{ steps.w.outputs.url }}" harare.pmtiles --bbox=30.85,-18.02,31.25,-17.68
+          ls -la harare.pmtiles
+          size=$(stat -c %s harare.pmtiles)
+          echo "Size: $size bytes"
+          test "$size" -gt 1000000
+
+      - name: Put it in a Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete harare-map -y --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+          gh release create harare-map harare.pmtiles --repo "$GITHUB_REPOSITORY" --title "Harare map" --notes "Map file for WaveStride. Data from OpenStreetMap contributors, tiles by Protomaps." --latest=false
